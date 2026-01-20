@@ -9,8 +9,9 @@ export function tokenizeExpression(input) {
   if (!input) return [];
   const tokens = [];
   let i = 0;
-  
+  console.log({input})
   while (i < input.length) {
+
     // Skip whitespace (will be preserved as text)
     if (/\s/.test(input[i])) {
       let start = i;
@@ -31,6 +32,7 @@ export function tokenizeExpression(input) {
     
     // Check for mapping/path: Node.Key or Node.Array[index]
     if (/^[A-Za-z_][A-Za-z0-9_]*/.test(input.slice(i))) {
+    
       const mappingToken = parseMapping(input, i);
       if (mappingToken) {
         tokens.push(mappingToken.token);
@@ -117,55 +119,133 @@ function parseFunction(input, start) {
   };
 }
 
+// function parseMapping(input, start) {
+//   let i = start;
+//   const segments = [];
+//   let currentPart = '';
+  
+//   while (i < input.length) {
+//     const ch = input[i];
+//     debugger
+//     if (ch === '[') {
+//       // Add current part as static
+//       if (currentPart) {
+//         segments.push({ text: currentPart, kind: 'static' });
+//         currentPart = '';
+//       }
+//       // Parse index
+//       segments.push({ text: '[', kind: 'static' });
+//       i++;
+//       let indexContent = '';
+//       while (i < input.length && input[i] !== ']') {
+//         indexContent += input[i];
+//         i++;
+//       }
+//       if (i < input.length) {
+//         segments.push({ text: sanitizeIndex(indexContent), kind: 'index' });
+//         segments.push({ text: ']', kind: 'static' });
+//         i++;
+//       }
+//     } else if (ch === '.') {
+//       if (currentPart) {
+//         segments.push({ text: currentPart, kind: 'static' });
+//         currentPart = '';
+//       }
+//       segments.push({ text: '.', kind: 'static' });
+//       i++;
+//     } else if (/[A-Za-z0-9_]/.test(ch)) {
+//       currentPart += ch;
+//       i++;
+//     } else {
+//       // End of mapping
+//       break;
+//     }
+//   }
+  
+//   if (currentPart) {
+//     segments.push({ text: currentPart, kind: 'static' });
+//   }
+  
+//   if (segments.length === 0) return null;
+  
+//   return {
+//     token: {
+//       kind: 'mapping',
+//       type: 'path',
+//       raw: input.slice(start, i),
+//       segments
+//     },
+//     nextIndex: i
+//   };
+// }
 function parseMapping(input, start) {
   let i = start;
   const segments = [];
   let currentPart = '';
-  
+
   while (i < input.length) {
     const ch = input[i];
-    
+
+    // Handle array index
     if (ch === '[') {
-      // Add current part as static
       if (currentPart) {
         segments.push({ text: currentPart, kind: 'static' });
         currentPart = '';
       }
-      // Parse index
-      segments.push({ text: '[', kind: 'static' });
+      segments.push({ text: '[', kind: 'bracket' });
       i++;
+
       let indexContent = '';
       while (i < input.length && input[i] !== ']') {
         indexContent += input[i];
         i++;
       }
+
       if (i < input.length) {
         segments.push({ text: sanitizeIndex(indexContent), kind: 'index' });
-        segments.push({ text: ']', kind: 'static' });
+        segments.push({ text: ']', kind: 'bracket' });
         i++;
       }
-    } else if (ch === '.') {
+    }
+
+    // Handle dot
+    else if (ch === '.') {
       if (currentPart) {
         segments.push({ text: currentPart, kind: 'static' });
         currentPart = '';
       }
       segments.push({ text: '.', kind: 'static' });
       i++;
-    } else if (/[A-Za-z0-9_]/.test(ch)) {
+    }
+
+    // 🔥 HANDLE COLON (THIS IS THE KEY FIX)
+    else if (ch === ':') {
+      if (currentPart) {
+        segments.push({ text: currentPart, kind: 'static' });
+        currentPart = '';
+      }
+      segments.push({ text: ':', kind: 'static' });
+      i++;
+    }
+
+    // Normal identifier characters
+    else if (/[A-Za-z0-9_]/.test(ch)) {
       currentPart += ch;
       i++;
-    } else {
-      // End of mapping
+    }
+
+    // Stop mapping only on whitespace or unknown chars
+    else {
       break;
     }
   }
-  
+
   if (currentPart) {
     segments.push({ text: currentPart, kind: 'static' });
   }
-  
+
   if (segments.length === 0) return null;
-  
+
   return {
     token: {
       kind: 'mapping',
@@ -207,6 +287,5 @@ export function isIndexEditableRange(node) {
   const seg = el?.getAttribute?.('data-seg');
   return seg === 'index';
 }
-
 
 
