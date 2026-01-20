@@ -309,21 +309,56 @@ export class ImtCoder extends LitElement {
 
   insertMapping(mapping) {
     if (!mapping) return;
-    const insertion = ` ${mapping} `;
-    const sel = window.getSelection();
-    const rangeText = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
-    const current = this.value ?? "";
-    if (
-      rangeText &&
-      this.shadowRoot &&
-      this.shadowRoot.contains(rangeText.startContainer)
-    ) {
-      // Best-effort: append to end if selection is inside the component.
-      this.value = `${current}${current ? " " : ""}${mapping}`;
-    } else {
-      this.value = `${current}${current ? " " : ""}${mapping}`;
+
+    // Normalize mapping and build token
+    const trimmed = mapping.trim();
+    const mappingToken =
+      this._parseMappingToken(trimmed) || ({ kind: "text", text: trimmed });
+
+    // Stop any pending async updates
+    if (this._pendingUpdate) {
+      clearTimeout(this._pendingUpdate);
+      this._pendingUpdate = null;
     }
+
+    // Avoid re-parsing while we mutate tokens
+    this._isUpdating = true;
+    this._skipReparse = true;
+    this._manualTokenUpdate = true;
+    this._editingElements.clear();
+
+    // Work on a fresh copy to keep ordering stable
+    const tokens = [...this._tokens];
+    const last = tokens[tokens.length - 1];
+
+    // Add separating space as its own text token if needed
+    const needsSpace =
+      tokens.length > 0 &&
+      !(
+        last.kind === "text" &&
+        (last.text.endsWith(" ") || last.text === " ")
+      );
+    if (needsSpace) {
+      if (last && last.kind === "text") {
+        last.text = last.text + " ";
+      } else {
+        tokens.push({ kind: "text", text: " " });
+      }
+    }
+
+    tokens.push(mappingToken);
+
+    this._tokens = tokens;
+    const newValue = joinTokens(tokens);
+    this.value = newValue;
     this._notifyChange();
+    this.requestUpdate();
+
+    this.updateComplete.then(() => {
+      this._isUpdating = false;
+      this._skipReparse = false;
+      this._manualTokenUpdate = false;
+    });
   }
 
   _notifyChange() {
@@ -565,27 +600,70 @@ export class ImtCoder extends LitElement {
     );
   }
 
-_onMouseDown(e) {
-  // Prevent browser from placing caret on container
-  e.preventDefault();
+  _onContainerFocus(e) {
+    // If focus is inside an index segment, do NOT open the modal
+    if (this._isInIndex(e)) return;
 
-  const root = this.renderRoot.querySelector('[data-role="editable-root"]');
-  if (!root) return;
-
-  // If clicking on a spacer → place caret there
-  const targetSpacer = e.composedPath().find(
-    el => el?.classList?.contains?.('spacer')
-  );
-
-  if (targetSpacer) {
-    this._placeCaretInSpacer(targetSpacer);
-    return;
+    this.dispatchEvent(
+      new CustomEvent("open-mapping-modal", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
-  // Otherwise → place caret in LAST spacer
-  const spacers = root.querySelectorAll('.spacer');
-  const lastSpacer = spacers[spacers.length - 1];
-  this._placeCaretInSpacer(lastSpacer);
+  _isInIndex(event) {
+    const path = event.composedPath ? event.composedPath() : [];
+    return path.some(
+      (el) => el?.nodeType === 1 && el.hasAttribute?.("data-seg") && el.getAttribute("data-seg") === "index"
+    );
+  }
+
+_onMouseDown(e) {
+   const path = e.composedPath ? e.composedPath() : [];
+
+   // 1) Allow normal placement inside index so caret can enter [ ]
+   const isIndexClick = path.some(
+     (el) => el?.nodeType === 1 && el.getAttribute?.("data-seg") === "index"
+   );
+   if (isIndexClick) return;
+
+   // 2) Allow normal placement inside free-text fragments
+   const isTextClick = path.some((el) => el?.classList?.contains?.("input-fragment"));
+   if (isTextClick) return;
+
+   const root = this.renderRoot.querySelector('[data-role="editable-root"]');
+   if (!root) return;
+
+   // From here: we control caret placement via spacers
+   e.preventDefault();
+
+   // If clicking on a spacer → place caret there
+   const targetSpacer = path.find((el) => el?.classList?.contains?.("spacer"));
+   if (targetSpacer) {
+     this._placeCaretInSpacer(targetSpacer);
+     return;
+   }
+
+   // If clicking on a pill (token) → place caret before/after token depending on click X
+   const pillEl = path.find((el) => el?.getAttribute?.("data-pill-index") != null);
+   if (pillEl) {
+     const pillIndex = Number(pillEl.getAttribute("data-pill-index"));
+     const rect = pillEl.getBoundingClientRect?.();
+     const clickLeft = rect ? (e.clientX - rect.left) < rect.width / 2 : false;
+     // Left half => spacer BEFORE pill, Right half => spacer AFTER pill
+     const spacerAfter = clickLeft ? pillIndex - 1 : pillIndex;
+     const spacer = root.querySelector(`.spacer[data-spacer-after="${spacerAfter}"]`);
+     if (spacer) {
+       this._placeCaretInSpacer(spacer);
+       return;
+     }
+   }
+
+   // Otherwise → place caret in LAST spacer
+   const spacers = root.querySelectorAll(".spacer");
+   const lastSpacer = spacers[spacers.length - 1];
+   this._placeCaretInSpacer(lastSpacer);
 }
 
 
@@ -603,13 +681,7 @@ _onMouseDown(e) {
         @mousedown=${this._onMouseDown}
         @focusin=${this._onFocusIn}
         @focusout=${this._onFocusOut}
-        @focus=${() =>
-          this.dispatchEvent(
-            new CustomEvent("open-mapping-modal", {
-              bubbles: true,
-              composed: true,
-            })
-          )}
+        @focus=${this._onContainerFocus}
       >
         ${this._renderSpacer(-1)}
         ${tokens.map((t, i) => {

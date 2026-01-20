@@ -1,6 +1,6 @@
 import React from "react";
 import { createComponent } from "@lit-labs/react";
-import "./imt-coder.js";
+import "../lit/imt-coder.js";
 
 const ImtCoderReact = createComponent({
   react: React,

@@ -13,7 +13,7 @@ const sample = {
 };
 
 export default function App() {
-  const [value, setValue] = useState("1. Spaces[5] $average(Shopify.customers[].id)");
+  const [value, setValue] = useState("");
   return (
     <div style={{ padding: 24 }}>
       <h2>Lit Mapping Input Demo</h2>
